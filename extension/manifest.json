@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "WatchParty for Hulu & Plex",
+  "version": "1.0.0",
+  "description": "Watch Hulu and Plex in sync with friends, with group chat. Teleparty-style.",
+  "permissions": ["storage", "activeTab", "webNavigation"],
+  "host_permissions": [
+    "*://*.hulu.com/*",
+    "*://*.plex.tv/*",
+    "*://*.plex.direct/*",
+    "http://localhost:32400/*",
+    "http://127.0.0.1:32400/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "WatchParty",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.hulu.com/*",
+        "*://*.plex.tv/*",
+        "*://*.plex.direct/*",
+        "http://localhost:32400/*",
+        "http://127.0.0.1:32400/*"
+      ],
+      "js": ["config.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

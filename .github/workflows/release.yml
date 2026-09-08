@@ -1,0 +1,36 @@
+name: Build extension zip
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "extension/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip the extension
+        run: |
+          cd extension
+          zip -r ../watchparty-extension.zip . -x "*.DS_Store"
+
+      - name: Publish as the "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: WatchParty extension (latest)
+          body: |
+            Download **watchparty-extension.zip**, unzip it, then in Chrome open
+            `chrome://extensions`, turn on Developer mode, click **Load unpacked**,
+            and pick the unzipped folder. Then open the invite link your friend sent you.
+          files: watchparty-extension.zip
+          prerelease: false
+          make_latest: true

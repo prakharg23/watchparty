@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: watchparty-relay
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: PARTY_SECRET
+        generateValue: true

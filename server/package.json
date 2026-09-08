@@ -1,0 +1,14 @@
+{
+  "name": "watchparty-server",
+  "version": "1.0.0",
+  "description": "WebSocket relay server for WatchParty (Teleparty-style sync for Hulu and Plex)",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
