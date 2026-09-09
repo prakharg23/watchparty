@@ -28,6 +28,7 @@
   let reconnectTimer = null;
   let pendingJoin = null; // { type: 'create'|'join', code? } to send once socket opens
   let unread = 0;
+  let pendingError = null; // last create/join failure, surfaced to the popup
   let typingTimer = null;
   let typingUsers = new Map();
 
@@ -155,6 +156,29 @@
   // ---------------------------------------------------------------------------
   // WebSocket
   // ---------------------------------------------------------------------------
+  document.addEventListener("securitypolicyviolation", (e) => {
+    if (e.violatedDirective && /connect-src|default-src/.test(e.violatedDirective) && e.blockedURI && serverUrl.includes(new URL(e.blockedURI).host)) {
+      failPending(`This page's security policy blocked the connection to ${serverUrl}.`);
+    }
+  });
+
+  function failPending(text) {
+    pendingError = text;
+    if (pendingResolve) {
+      const r = pendingResolve;
+      pendingResolve = null;
+      pendingJoin = null;
+      r({ ok: false, error: text });
+    }
+    clearTimeout(reconnectTimer);
+    if (ws) {
+      ws.onclose = null;
+      try { ws.close(); } catch {}
+      ws = null;
+    }
+    setConn(false, "Failed");
+  }
+
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     try {
@@ -239,6 +263,7 @@
       case "error":
         sysMessage(msg.text);
         toast(msg.text);
+        pendingError = msg.text;
         pendingResolve?.({ ok: false, error: msg.text });
         pendingResolve = null;
         pendingJoin = null;
@@ -318,6 +343,7 @@
       code: party?.code || null,
       users: party?.users?.length || 0,
       inviteUrl: party ? withPartyHash(location.href, party.code) : null,
+      pendingError,
     };
   }
 
@@ -350,6 +376,7 @@
 
   function startParty(kind, code) {
     return new Promise((resolve) => {
+      pendingError = null;
       pendingResolve = resolve;
       pendingJoin = kind === "create" ? { type: "create" } : { type: "join", code };
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -362,7 +389,8 @@
         if (pendingResolve === resolve) {
           pendingResolve = null;
           pendingJoin = null;
-          resolve({ ok: false, error: `Could not reach relay server at ${serverUrl}. Is it running?` });
+          pendingError = `Could not reach relay server at ${serverUrl}. Is it running?`;
+          resolve({ ok: false, error: pendingError });
         }
       }, 90000);
     });
