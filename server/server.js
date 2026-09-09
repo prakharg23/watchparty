@@ -21,6 +21,7 @@ class Room {
     this.clients = new Set();
     this.hostId = null;
     this.state = { paused: true, time: 0, updatedAt: Date.now(), url: null };
+    this.urlUpdatedAt = 0;
     this.chat = [];
     this.emptySince = Date.now();
   }
@@ -149,6 +150,18 @@ wss.on("connection", (ws) => {
         if (!Number.isFinite(time)) return;
         room.state = { paused: !!msg.paused, time, updatedAt: Date.now(), url: room.state.url };
         broadcast(room, { type: "heartbeat", paused: room.state.paused, time }, ws);
+        // The host's heartbeat carries its page. If the host is somewhere the
+        // room doesn't know about (a missed next-episode message), everyone
+        // follows. A recent explicit "url" wins for 20s to avoid ping-pong.
+        if (
+          typeof msg.url === "string" &&
+          msg.url !== room.state.url &&
+          Date.now() - room.urlUpdatedAt > 20000
+        ) {
+          room.state.url = msg.url.slice(0, 2000);
+          room.urlUpdatedAt = Date.now();
+          broadcast(room, { type: "url", url: room.state.url, from: ws.name }, ws);
+        }
         break;
       }
       case "url": {
@@ -157,6 +170,7 @@ wss.on("connection", (ws) => {
         // Someone moved to a new video (next episode). Everyone follows, and
         // the playback position starts over for the new video.
         room.state = { paused: false, time: 0, updatedAt: Date.now(), url: msg.url.slice(0, 2000) };
+        room.urlUpdatedAt = Date.now();
         broadcast(room, { type: "url", url: room.state.url, from: ws.name }, ws);
         break;
       }

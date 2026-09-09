@@ -221,8 +221,8 @@
   function startHeartbeat() {
     stopHeartbeat();
     heartbeatTimer = setInterval(() => {
-      if (!party || !video || party.hostId !== party.id) return;
-      wsSend({ type: "heartbeat", paused: video.paused, time: video.currentTime });
+      if (!party || !video || party.hostId !== party.id || navigatingTo) return;
+      wsSend({ type: "heartbeat", paused: video.paused, time: video.currentTime, url: cleanUrl(location.href) });
     }, HEARTBEAT_MS);
   }
   function stopHeartbeat() {
@@ -242,8 +242,11 @@
     if (key === lastPageKey) return;
     lastPageKey = key;
     if (!party || navigatingTo || Date.now() < followQuietUntil) return;
-    // Only drag the party along if the new page actually has a player.
-    const hasVideo = await waitForVideo(8000);
+    // Only drag the party along if the new page is (or becomes) a video page.
+    // Hulu watch pages are obvious from the path; elsewhere wait for a player,
+    // generously, since ads and spinners can delay it.
+    const isWatchPage = site === "hulu" && /^\/watch\//.test(location.pathname);
+    const hasVideo = isWatchPage || (await waitForVideo(30000));
     if (!hasVideo || !party || pageKey(location.href) !== key) return;
     wsSend({ type: "url", url: cleanUrl(location.href) });
     sysMessage("You moved to a new video. Everyone is following.", true);
@@ -278,8 +281,19 @@
     sysMessage(`Following ${who}...`, true);
     // The party is remembered per tab, so the new page rejoins on its own.
     rememberParty(party.code).finally(() => {
-      location.href = url;
+      location.assign(url);
     });
+    setTimeout(() => {
+      if (navigatingTo !== url) return;
+      if (pageKey(location.href) === pageKey(url)) {
+        navigatingTo = null;
+        return;
+      }
+      location.assign(url);
+      setTimeout(() => {
+        if (navigatingTo === url) navigatingTo = null;
+      }, 10000);
+    }, 10000);
   }
 
   function fmt(t) {
