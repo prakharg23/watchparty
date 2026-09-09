@@ -154,7 +154,9 @@ wss.on("connection", (ws) => {
       case "url": {
         const room = ws.room;
         if (!room || typeof msg.url !== "string") return;
-        room.state.url = msg.url.slice(0, 2000);
+        // Someone moved to a new video (next episode). Everyone follows, and
+        // the playback position starts over for the new video.
+        room.state = { paused: false, time: 0, updatedAt: Date.now(), url: msg.url.slice(0, 2000) };
         broadcast(room, { type: "url", url: room.state.url, from: ws.name }, ws);
         break;
       }

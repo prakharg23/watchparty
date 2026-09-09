@@ -1,6 +1,6 @@
-// Service worker: seeds default settings on install. The popup talks to the
-// page's content script directly, so nothing long-running lives here (Chrome
-// stops idle service workers after ~30s, which would drop a slow request).
+// Service worker: seeds default settings, tells content scripts their tab id
+// (so a party can be remembered per tab across next-episode navigation), and
+// forgets a tab's party when the tab closes. Nothing long-running lives here.
 importScripts("config.js");
 
 const DEFAULTS = {
@@ -16,4 +16,15 @@ chrome.runtime.onInstalled.addListener(async () => {
     if (current[k] === undefined) patch[k] = v;
   }
   if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
+});
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === "tabId") {
+    sendResponse({ tabId: sender.tab?.id ?? null });
+    return false;
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  chrome.storage.local.remove("party:" + tabId);
 });

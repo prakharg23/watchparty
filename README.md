@@ -71,6 +71,11 @@ Anyone can play, pause, or seek and everyone follows. The chat slides out from t
 right edge. The starred person is the host and keeps everyone aligned with a
 position heartbeat every 5 seconds.
 
+**Next episode:** when anyone moves to a new video (Hulu autoplaying the next
+episode, or picking another title), everyone else's tab follows to the same page
+and rejoins the party automatically. The party is remembered per tab, so a page
+reload also rejoins. Click **Leave** to stop following.
+
 ---
 
 ## Good to know

@@ -33,28 +33,42 @@
 </div>
 
 <script>
-  // Minimal chrome.* shim so content.js runs in a plain page.
-  const store = { serverUrl: "ws://localhost:8080", nickname: new URLSearchParams(location.search).get("nick") || "" };
+  // Minimal chrome.* shim so content.js runs in a plain page. Storage is backed
+  // by sessionStorage so settings and the remembered party survive a reload,
+  // the way chrome.storage does for the real extension.
+  const nickParam = new URLSearchParams(location.search).get("nick");
+  const load = (k, d) => { try { return JSON.parse(sessionStorage.getItem(k)) || d; } catch { return d; } };
+  const save = (k, v) => sessionStorage.setItem(k, JSON.stringify(v));
+  const areas = {
+    sync: load("wp-sync", { serverUrl: "ws://localhost:8080", nickname: "" }),
+    local: load("wp-local", {}),
+  };
+  if (nickParam && !areas.sync.nickname) areas.sync.nickname = nickParam;
   const listeners = [];
   const changeListeners = [];
-  window.chrome = {
-    runtime: { onMessage: { addListener: (fn) => listeners.push(fn) } },
-    storage: {
-      sync: {
-        get: async (keys) => {
-          const out = {};
-          for (const k of keys) if (store[k] !== undefined) out[k] = store[k];
-          return out;
-        },
-        set: async (obj) => {
-          const changes = {};
-          for (const [k, v] of Object.entries(obj)) { changes[k] = { oldValue: store[k], newValue: v }; store[k] = v; }
-          changeListeners.forEach((fn) => fn(changes));
-        },
-      },
-      onChanged: { addListener: (fn) => changeListeners.push(fn) },
+  const makeArea = (name) => ({
+    get: async (keys) => {
+      const ks = typeof keys === "string" ? [keys] : keys;
+      const out = {};
+      for (const k of ks) if (areas[name][k] !== undefined) out[k] = areas[name][k];
+      return out;
     },
+    set: async (obj) => {
+      const changes = {};
+      for (const [k, v] of Object.entries(obj)) { changes[k] = { oldValue: areas[name][k], newValue: v }; areas[name][k] = v; }
+      save("wp-" + name, areas[name]);
+      changeListeners.forEach((fn) => fn(changes, name));
+    },
+    remove: async (key) => { delete areas[name][key]; save("wp-" + name, areas[name]); },
+  });
+  window.chrome = {
+    runtime: {
+      onMessage: { addListener: (fn) => listeners.push(fn) },
+      sendMessage: async (m) => (m?.type === "tabId" ? { tabId: 1 } : {}),
+    },
+    storage: { sync: makeArea("sync"), local: makeArea("local"), onChanged: { addListener: (fn) => changeListeners.push(fn) } },
   };
+  window.wpStore = areas;
   // Send a message to the content script the way the popup would.
   window.sendToContent = (msg) =>
     new Promise((resolve) => listeners.forEach((fn) => fn(msg, {}, resolve)));
