@@ -137,7 +137,15 @@ wss.on("connection", (ws) => {
         };
         broadcast(
           room,
-          { type: "state", action: msg.action, paused: room.state.paused, time, from: ws.name, fromId: ws.id },
+          {
+            type: "state",
+            action: msg.action,
+            paused: room.state.paused,
+            time,
+            from: ws.name,
+            fromId: ws.id,
+            url: typeof msg.url === "string" ? msg.url.slice(0, 2000) : undefined,
+          },
           ws
         );
         break;
@@ -149,7 +157,11 @@ wss.on("connection", (ws) => {
         const time = Number(msg.time);
         if (!Number.isFinite(time)) return;
         room.state = { paused: !!msg.paused, time, updatedAt: Date.now(), url: room.state.url };
-        broadcast(room, { type: "heartbeat", paused: room.state.paused, time }, ws);
+        broadcast(
+          room,
+          { type: "heartbeat", paused: room.state.paused, time, url: typeof msg.url === "string" ? msg.url.slice(0, 2000) : undefined },
+          ws
+        );
         // The host's heartbeat carries its page. If the host is somewhere the
         // room doesn't know about (a missed next-episode message), everyone
         // follows. A recent explicit "url" wins for 20s to avoid ping-pong.

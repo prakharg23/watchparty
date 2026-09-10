@@ -196,7 +196,19 @@
 
   function sendState(action) {
     if (!party || !video) return;
-    wsSend({ type: "state", action, paused: video.paused, time: video.currentTime });
+    wsSend({ type: "state", action, paused: video.paused, time: video.currentTime, url: cleanUrl(location.href) });
+  }
+
+  // True when a sync message is about a different video than the one on
+  // screen. Applying it would pause or seek the wrong episode.
+  function otherPage(msg) {
+    return typeof msg.url === "string" && pageKey(msg.url) !== pageKey(location.href);
+  }
+
+  function atEnd() {
+    if (!video) return false;
+    if (video.ended) return true;
+    return Number.isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration - 0.5;
   }
 
   function onLocalPlay() {
@@ -206,6 +218,7 @@
   function onLocalPause() {
     if (suppressed()) return;
     if (navigatingTo) return; // the old episode pausing as we leave it is not a user action
+    if (atEnd()) return; // episode finished on its own; not a user pause
     sendState("pause");
   }
   function onLocalSeeked() {
@@ -417,7 +430,7 @@
         if (others && msg.state?.url && party.hostId !== party.id && pageKey(msg.state.url) !== pageKey(location.href)) {
           // The party is on a different video than we are. Go there.
           followTo(msg.state.url, "the party");
-        } else if (others && msg.state && video) {
+        } else if (others && msg.state && video && !otherPage(msg.state)) {
           applyState(msg.state, { announce: `Synced to ${fmt(msg.state.time)}` });
         }
         startHeartbeat();
@@ -444,7 +457,7 @@
         sysMessage(msg.text);
         break;
       case "state": {
-        if (navigatingTo) break;
+        if (navigatingTo || otherPage(msg)) break;
         const label =
           msg.action === "play"
             ? `${msg.from} played at ${fmt(msg.time)}`
@@ -455,7 +468,7 @@
         break;
       }
       case "heartbeat":
-        if (party && party.hostId !== party.id && !navigatingTo) {
+        if (party && party.hostId !== party.id && !navigatingTo && !otherPage(msg)) {
           applyState(msg, { tolerance: DRIFT_TOLERANCE });
         }
         break;
