@@ -94,6 +94,11 @@ reload also rejoins. Click **Leave** to stop following.
 - **Privacy**: the relay refuses anyone without the access key. To rotate it, change
   `PARTY_SECRET` in Render, then update it in your extension settings and send new
   invite links.
+- **Restarts don't end the party**: a party code is a durable room name, not a
+  handle to something on the server. If the relay restarts, redeploys, or wakes
+  from sleep, everyone's tab rebuilds the same room within seconds and carries on.
+  You may see "Reconnecting" briefly. Typing a code by hand still says "not found"
+  if you get it wrong.
 
 ## Run the server yourself instead
 
@@ -113,3 +118,14 @@ account. It shims the `chrome.*` API, generates a local 20-second test clip, and
 loads the real `extension/content.js`. Serve the repo root with any static server
 (for example `python -m http.server 8422`), open the harness in two tabs, create a
 party in one and join from the other. Rebuild icons with `node make-icons.mjs`.
+
+`test/fuzz.mjs` is a brute-force harness for the relay: malformed and oversized
+frames, every message type crossed with hostile values, binary payloads, deeply
+nested JSON, connection churn, message floods, hundreds of rooms, a crowded room,
+repeated host handover, and unicode abuse. It checks the server is still alive
+after each round and still usable at the end. With the server running:
+
+```bash
+cd server
+npm run fuzz
+```

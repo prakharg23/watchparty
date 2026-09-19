@@ -44,6 +44,7 @@
   let followQuietUntil = 0;
   let navigatingTo = null;
   let positionTimer = null;
+  let reconnectDelay = 2000;
   let composeFrame = null;
   let composeReady = false;
   let composeReadyTimer = null;
@@ -296,7 +297,11 @@
 
   // Keep the roster clocks ticking between position reports.
   setInterval(() => {
-    if (party && usersEl) renderUsers();
+    try {
+      if (party && usersEl) renderUsers();
+    } catch {
+      /* keep ticking even if one render goes wrong */
+    }
   }, 1000);
 
   // ---------------------------------------------------------------------------
@@ -398,12 +403,15 @@
     setConn(false, "Connecting...");
 
     ws.onopen = () => {
+      reconnectDelay = 2000;
       setConn(true, "Connected");
       if (pendingJoin) {
         ws.send(JSON.stringify(joinPayload(pendingJoin)));
         pendingJoin = null;
       } else if (party) {
-        ws.send(JSON.stringify(joinPayload({ type: "join", code: party.code })));
+        // Recreate the room if the relay restarted while we were away, so a
+        // redeploy or a crash costs a few seconds instead of ending the party.
+        ws.send(JSON.stringify(joinPayload({ type: "join", code: party.code, create: true })));
       }
     };
 
@@ -414,7 +422,13 @@
       } catch {
         return;
       }
-      handleMessage(msg);
+      if (!msg || typeof msg !== "object") return;
+      try {
+        handleMessage(msg);
+      } catch (e) {
+        // One unexpected frame must never take the sidebar down with it.
+        console.warn("WatchParty: ignoring a message we could not handle", e);
+      }
     };
 
     ws.onclose = () => {
@@ -422,7 +436,12 @@
       stopHeartbeat();
       if (party || pendingJoin) {
         clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(connect, pendingJoin ? 3000 : 2000);
+        // Someone is waiting on a join, so retry briskly; otherwise back off so
+        // a server that is down for a while isn't hammered.
+        const delay = pendingJoin ? 3000 : reconnectDelay;
+        setConn(false, `Reconnecting in ${Math.round(delay / 1000)}s...`);
+        reconnectTimer = setTimeout(connect, delay);
+        if (!pendingJoin) reconnectDelay = Math.min(Math.round(reconnectDelay * 1.7), 30000);
       }
     };
     ws.onerror = () => setConn(false, "Can't reach server");
@@ -577,11 +596,15 @@
     return true;
   });
 
-  function startParty(kind, code) {
+  // autoCreate is for joins the user did not type: reconnects, invite links and
+  // the party this tab was already in. Those recreate a missing room. A code
+  // typed into the popup stays strict, so a typo still says "not found".
+  function startParty(kind, code, autoCreate = false) {
     return new Promise((resolve) => {
       pendingError = null;
       pendingResolve = resolve;
-      pendingJoin = kind === "create" ? { type: "create" } : { type: "join", code };
+      pendingJoin =
+        kind === "create" ? { type: "create" } : { type: "join", code, create: !!autoCreate };
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(joinPayload(pendingJoin)));
         pendingJoin = null;
@@ -1016,7 +1039,7 @@
         chrome.storage.sync.set({ nickname });
       }
     }
-    const r = await startParty("join", code);
+    const r = await startParty("join", code, true);
     if (r.ok) setCollapsed(false);
     else if (remembered) forgetParty();
   }
