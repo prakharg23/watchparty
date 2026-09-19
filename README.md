@@ -71,6 +71,11 @@ Anyone can play, pause, or seek and everyone follows. The chat slides out from t
 right edge. The starred person is the host and keeps everyone aligned with a
 position heartbeat every 5 seconds.
 
+**Seeing the sync:** each name in the sidebar carries that person's live position
+in the episode, and the line under them reads "In sync" while everyone is within
+a couple of seconds. If someone drifts it says how far behind or ahead they are,
+and if they are on a different video it says that instead.
+
 **Next episode:** when anyone moves to a new video (Hulu autoplaying the next
 episode, or picking another title), everyone else's tab follows to the same page
 and rejoins the party automatically. The party is remembered per tab, so a page

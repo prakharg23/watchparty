@@ -63,8 +63,16 @@
   });
   window.chrome = {
     runtime: {
+      id: "harness",
+      getURL: (path) => new URL("../extension/" + path, location.href).toString(),
       onMessage: { addListener: (fn) => listeners.push(fn) },
-      sendMessage: async (m) => (m?.type === "tabId" ? { tabId: 1 } : {}),
+      sendMessage: async (m) => {
+        if (m?.type === "tabId") return { tabId: 1 };
+        // Stand in for the background relay: hand compose messages straight
+        // back to the content script the way the real service worker does.
+        if (m?.wpCompose === true) listeners.forEach((fn) => fn(m, {}, () => {}));
+        return {};
+      },
     },
     storage: { sync: makeArea("sync"), local: makeArea("local"), onChanged: { addListener: (fn) => changeListeners.push(fn) } },
   };

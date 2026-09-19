@@ -23,6 +23,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ tabId: sender.tab?.id ?? null });
     return false;
   }
+  // Relay the chat box's messages from its frame to the page's content script,
+  // so what you type never passes through the streaming site's own page.
+  if (msg?.wpCompose === true && sender.tab?.id != null) {
+    chrome.tabs.sendMessage(sender.tab.id, msg, { frameId: 0 }).catch(() => {});
+    return false;
+  }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {

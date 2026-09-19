@@ -22,6 +22,7 @@ class Room {
     this.hostId = null;
     this.state = { paused: true, time: 0, updatedAt: Date.now(), url: null };
     this.urlUpdatedAt = 0;
+    this.lastPositions = 0;
     this.chat = [];
     this.emptySince = Date.now();
   }
@@ -43,6 +44,16 @@ function broadcast(room, msg, except = null) {
   for (const c of room.clients) {
     if (c !== except && c.readyState === c.OPEN) c.send(data);
   }
+}
+
+// Where each person is right now, for the sidebar's sync readout.
+function positions(room) {
+  return [...room.clients].map((c) => ({
+    id: c.id,
+    time: c.pos ? c.pos.time : null,
+    paused: c.pos ? c.pos.paused : true,
+    url: c.pos ? c.pos.url : null,
+  }));
 }
 
 function roster(room) {
@@ -87,6 +98,7 @@ wss.on("connection", (ws) => {
   ws.id = String(nextId++);
   ws.name = "Guest";
   ws.room = null;
+  ws.pos = null;
   ws.isAlive = true;
   ws.on("pong", () => (ws.isAlive = true));
 
@@ -186,6 +198,23 @@ wss.on("connection", (ws) => {
         broadcast(room, { type: "url", url: room.state.url, from: ws.name }, ws);
         break;
       }
+      case "position": {
+        const room = ws.room;
+        if (!room) return;
+        const time = Number(msg.time);
+        if (!Number.isFinite(time)) return;
+        ws.pos = {
+          time,
+          paused: !!msg.paused,
+          url: typeof msg.url === "string" ? msg.url.slice(0, 2000) : null,
+        };
+        const now = Date.now();
+        if (now - room.lastPositions > 900) {
+          room.lastPositions = now;
+          broadcast(room, { type: "positions", users: positions(room) });
+        }
+        break;
+      }
       case "chat": {
         const room = ws.room;
         if (!room) return;
@@ -253,6 +282,7 @@ function joinRoom(ws, room, msg) {
   });
   broadcast(room, { type: "system", text: `${ws.name} joined the party` }, ws);
   broadcast(room, { type: "roster", users: roster(room), hostId: room.hostId }, ws);
+  broadcast(room, { type: "positions", users: positions(room) });
 }
 
 // Keepalive + cleanup.

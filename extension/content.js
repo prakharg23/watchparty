@@ -14,6 +14,8 @@
   const URL_POLL_MS = 1000;
   const PARTY_MEMORY_MS = 12 * 60 * 60 * 1000; // rejoin a remembered party for up to 12h
   const FOLLOW_QUIET_MS = 15000; // after following someone, don't rebroadcast our URL for a while
+  const POSITION_MS = 2000; // how often we tell the party where we are
+  const SYNC_TOLERANCE = 2.5; // seconds apart before we call someone out of sync
 
   const site = /hulu\.com$/.test(location.hostname) ? "hulu" : "plex";
   const isTop = window.top === window;
@@ -41,6 +43,12 @@
   let lastPageKey = null;
   let followQuietUntil = 0;
   let navigatingTo = null;
+  let positionTimer = null;
+  let composeFrame = null;
+  let composeReady = false;
+  let composeReadyTimer = null;
+  let useIframeCompose = true;
+  let messageLog = [];
 
   // ---------------------------------------------------------------------------
   // URL helpers
@@ -233,6 +241,7 @@
 
   function startHeartbeat() {
     stopHeartbeat();
+    startPositions();
     heartbeatTimer = setInterval(() => {
       if (!party || !video || party.hostId !== party.id || navigatingTo) return;
       wsSend({ type: "heartbeat", paused: video.paused, time: video.currentTime, url: cleanUrl(location.href) });
@@ -241,6 +250,26 @@
   function stopHeartbeat() {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = null;
+    stopPositions();
+  }
+
+  // Everyone reports their own position, so the sidebar can show where each
+  // person actually is instead of just claiming to be synced.
+  function startPositions() {
+    stopPositions();
+    positionTimer = setInterval(() => {
+      if (!party || !video) return;
+      wsSend({
+        type: "position",
+        time: video.currentTime,
+        paused: video.paused,
+        url: cleanUrl(location.href),
+      });
+    }, POSITION_MS);
+  }
+  function stopPositions() {
+    if (positionTimer) clearInterval(positionTimer);
+    positionTimer = null;
   }
 
   // Watch for in-page navigation (Hulu autoplaying the next episode, clicking
@@ -264,6 +293,11 @@
     wsSend({ type: "url", url: cleanUrl(location.href) });
     sysMessage("You moved to a new video. Everyone is following.", true);
   }, URL_POLL_MS);
+
+  // Keep the roster clocks ticking between position reports.
+  setInterval(() => {
+    if (party && usersEl) renderUsers();
+  }, 1000);
 
   // ---------------------------------------------------------------------------
   // Remote -> local
@@ -453,6 +487,13 @@
           renderUsers();
         }
         break;
+      case "positions":
+        if (party && Array.isArray(msg.users)) {
+          party.positions = msg.users;
+          party.positionsAt = Date.now();
+          renderUsers();
+        }
+        break;
       case "system":
         sysMessage(msg.text);
         break;
@@ -507,6 +548,10 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg?.wpCompose === true) {
+      handleCompose(msg);
+      return false;
+    }
     (async () => {
       switch (msg?.type) {
         case "status":
@@ -564,7 +609,7 @@
   // ---------------------------------------------------------------------------
   // UI
   // ---------------------------------------------------------------------------
-  let root, toggle, messagesEl, usersEl, statusEl, typingEl, inputEl, badgeEl;
+  let root, toggle, messagesEl, usersEl, syncEl, statusEl, typingEl, inputEl, badgeEl;
   let collapsed = true;
 
   function el(tag, cls, text) {
@@ -573,6 +618,30 @@
     if (text !== undefined) e.textContent = text;
     return e;
   }
+
+  // If we ever fall back to an in-page box, stop the site's player from seeing
+  // keystrokes aimed at it. Capturing on window beats page-level handlers, and
+  // Enter is handled here because nothing downstream will get the chance.
+  for (const type of ["keydown", "keyup", "keypress", "beforeinput"]) {
+    window.addEventListener(
+      type,
+      (e) => {
+        if (!root || !inputEl || !root.contains(e.target)) return;
+        if (type === "keydown" && e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendChat();
+        }
+        e.stopImmediatePropagation();
+      },
+      true
+    );
+  }
+
+  window.addEventListener("message", (e) => {
+    if (!composeFrame || e.source !== composeFrame.contentWindow) return;
+    const m = e.data;
+    if (m && m.wpCompose === true) handleCompose(m);
+  });
 
   function buildUI() {
     if (root) return;
@@ -602,7 +671,7 @@
     if (!c) {
       unread = 0;
       renderBadge();
-      setTimeout(() => inputEl?.focus(), 250);
+      setTimeout(() => focusCompose(), 250);
     }
   }
 
@@ -662,29 +731,52 @@
 
     usersEl = el("div", "wp-users");
     root.appendChild(usersEl);
+    syncEl = el("div", "wp-syncline");
+    root.appendChild(syncEl);
     renderUsers();
 
     messagesEl = el("div", "wp-messages");
     root.appendChild(messagesEl);
+    for (const m of messageLog) renderMessage(m);
+    scrollBottom();
 
     typingEl = el("div", "wp-typing");
     root.appendChild(typingEl);
 
+    renderCompose();
+  }
+
+  // The message box lives in its own extension frame, because Hulu's player
+  // claims keystrokes on the page before a normal text box can see them.
+  function renderCompose() {
+    const canFrame = useIframeCompose && typeof chrome !== "undefined" && !!chrome.runtime?.getURL;
+    if (canFrame) {
+      inputEl = null;
+      composeReady = false;
+      composeFrame = document.createElement("iframe");
+      composeFrame.id = "wp-compose-frame";
+      composeFrame.title = "WatchParty message box";
+      composeFrame.src = chrome.runtime.getURL("compose.html");
+      root.appendChild(composeFrame);
+      clearTimeout(composeReadyTimer);
+      composeReadyTimer = setTimeout(() => {
+        if (composeReady || !root) return;
+        // The frame was blocked. Use a plain box guarded by the key trap below.
+        useIframeCompose = false;
+        composeFrame?.remove();
+        composeFrame = null;
+        renderCompose();
+      }, 5000);
+      return;
+    }
+
+    composeFrame = null;
     const compose = el("div", "wp-compose");
     inputEl = document.createElement("textarea");
     inputEl.placeholder = "Say something...";
     inputEl.rows = 1;
-    inputEl.addEventListener("keydown", (e) => {
-      e.stopPropagation(); // keep Hulu/Plex hotkeys (space, arrows) from firing while typing
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendChat();
-      }
-    });
-    inputEl.addEventListener("keyup", (e) => e.stopPropagation());
-    inputEl.addEventListener("keypress", (e) => e.stopPropagation());
     inputEl.addEventListener("input", () => {
-      sendTyping(true);
+      sendTyping(inputEl.value.length > 0);
       clearTimeout(typingTimer);
       typingTimer = setTimeout(() => sendTyping(false), 1500);
     });
@@ -696,18 +788,81 @@
     root.appendChild(compose);
   }
 
+  function focusCompose() {
+    if (composeFrame) {
+      try {
+        composeFrame.contentWindow?.postMessage({ wpComposeCmd: true, type: "focus" }, "*");
+      } catch {}
+      return;
+    }
+    inputEl?.focus();
+  }
+
   function renderUsers() {
     if (!usersEl || !party) return;
     usersEl.textContent = "";
+    const posById = new Map((party.positions || []).map((p) => [p.id, p]));
+    // Reports are a couple of seconds old. If they were playing when they sent
+    // it, move their clock forward so the comparison is fair.
+    const age = party.positionsAt ? (Date.now() - party.positionsAt) / 1000 : 0;
+    const clockOf = (u) => {
+      if (u.id === party.id) return video ? video.currentTime : null;
+      const p = posById.get(u.id);
+      if (!p || !Number.isFinite(p.time)) return null;
+      return p.paused ? p.time : p.time + age;
+    };
+
+    const me = (party.users || []).find((u) => u.id === party.id);
+    const mine = me ? clockOf(me) : null;
+    const notes = [];
+
     for (const u of party.users || []) {
-      const chip = el(
-        "span",
-        "wp-user" + (u.id === party.hostId ? " wp-host" : ""),
-        u.id === party.id ? `${u.name} (you)` : u.name
-      );
-      if (u.id === party.hostId) chip.title = "Host (keeps everyone in sync)";
+      const self = u.id === party.id;
+      const t = clockOf(u);
+      const chip = el("span", "wp-user" + (u.id === party.hostId ? " wp-host" : ""));
+      chip.appendChild(el("span", "wp-uname", self ? `${u.name} (you)` : u.name));
+      chip.appendChild(el("span", "wp-utime", t === null ? "--:--" : fmt(t)));
+      chip.title = u.id === party.hostId ? "Host (keeps everyone in sync)" : u.name;
+
+      if (!self) {
+        const p = posById.get(u.id);
+        const elsewhere = p && p.url && pageKey(p.url) !== pageKey(location.href);
+        if (elsewhere) {
+          chip.classList.add("wp-elsewhere");
+          notes.push({ level: 2, text: `${u.name} is on a different video` });
+        } else if (t !== null && mine !== null && Math.abs(t - mine) > SYNC_TOLERANCE) {
+          chip.classList.add("wp-drift");
+          notes.push({
+            level: 1,
+            text: `${u.name} is ${gap(Math.abs(t - mine))} ${t < mine ? "behind" : "ahead"}`,
+          });
+        }
+      }
       usersEl.appendChild(chip);
     }
+    renderSync(notes, (party.users || []).length);
+  }
+
+  function gap(seconds) {
+    const s = Math.round(seconds);
+    return s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`;
+  }
+
+  function renderSync(notes, count) {
+    if (!syncEl) return;
+    if (count < 2) {
+      syncEl.textContent = "Waiting for someone to join";
+      syncEl.className = "wp-syncline";
+      return;
+    }
+    if (!notes.length) {
+      syncEl.textContent = "\u2713 In sync";
+      syncEl.className = "wp-syncline wp-ok";
+      return;
+    }
+    notes.sort((a, b) => b.level - a.level);
+    syncEl.textContent = notes.map((n) => n.text).join(" \u00b7 ");
+    syncEl.className = "wp-syncline " + (notes[0].level === 2 ? "wp-bad" : "wp-warn");
   }
 
   function setConn(online, text) {
@@ -728,6 +883,7 @@
   }
 
   function clearMessages() {
+    messageLog = [];
     if (messagesEl) messagesEl.textContent = "";
   }
 
@@ -735,28 +891,67 @@
     if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  function chatMessage(m) {
+  function renderMessage(m) {
     if (!messagesEl) return;
+    if (m.kind === "sys") {
+      messagesEl.appendChild(el("div", "wp-sys" + (m.event ? " wp-event" : ""), m.text));
+      return;
+    }
     const mine = m.id === party?.id;
     const wrap = el("div", "wp-msg" + (mine ? " wp-mine" : ""));
     if (!mine) wrap.appendChild(el("div", "wp-name", m.name));
     wrap.appendChild(el("div", "wp-bubble", m.text));
     messagesEl.appendChild(wrap);
+  }
+
+  // Keep a log as well as the DOM, so rebuilding the sidebar never wipes the chat.
+  function pushMessage(entry) {
+    messageLog.push(entry);
+    if (messageLog.length > 300) messageLog.shift();
+    renderMessage(entry);
     scrollBottom();
+  }
+
+  function chatMessage(m) {
+    pushMessage({ kind: "chat", id: m.id, name: m.name, text: m.text });
   }
 
   function sysMessage(text, isEvent = false) {
-    if (!messagesEl) return;
-    messagesEl.appendChild(el("div", "wp-sys" + (isEvent ? " wp-event" : ""), text));
-    scrollBottom();
+    pushMessage({ kind: "sys", text, event: isEvent });
   }
 
   function sendChat() {
-    const text = inputEl.value.trim();
-    if (!text) return;
-    wsSend({ type: "chat", text });
+    if (!inputEl) return;
+    const text = inputEl.value;
     inputEl.value = "";
+    sendChatText(text);
+  }
+
+  function sendChatText(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      sysMessage("Not connected, message not sent.");
+      return;
+    }
+    wsSend({ type: "chat", text });
     sendTyping(false);
+  }
+
+  // Messages from the compose frame, by either route.
+  function handleCompose(msg) {
+    switch (msg.type) {
+      case "ready":
+        composeReady = true;
+        clearTimeout(composeReadyTimer);
+        break;
+      case "send":
+        sendChatText(msg.text);
+        break;
+      case "typing":
+        sendTyping(!!msg.typing);
+        break;
+    }
   }
 
   function sendTyping(typing) {

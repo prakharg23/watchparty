@@ -40,5 +40,17 @@
       "run_at": "document_idle",
       "all_frames": true
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["compose.html", "compose.js"],
+      "matches": [
+        "*://*.hulu.com/*",
+        "*://*.plex.tv/*",
+        "*://*.plex.direct/*",
+        "http://localhost:32400/*",
+        "http://127.0.0.1:32400/*"
+      ]
+    }
   ]
 }

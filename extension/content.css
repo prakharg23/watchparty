@@ -112,6 +112,9 @@
   border-bottom: 1px solid var(--wp-border);
 }
 .wp-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   padding: 3px 8px;
   border-radius: 12px;
@@ -120,7 +123,44 @@
   color: var(--wp-text);
 }
 .wp-user.wp-host { border-color: #f1c40f; }
-.wp-user.wp-host::before { content: "\2605  "; color: #f1c40f; }
+.wp-user.wp-host::before { content: "\2605"; color: #f1c40f; }
+.wp-uname { white-space: nowrap; }
+
+/* Each person's position in the episode, so you can see the party is together. */
+.wp-utime {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--wp-muted);
+  background: rgba(255, 255, 255, 0.07);
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+.wp-user.wp-drift { border-color: #f1c40f; }
+.wp-user.wp-drift .wp-utime { color: #f1c40f; }
+.wp-user.wp-elsewhere { border-color: #e74c3c; }
+.wp-user.wp-elsewhere .wp-utime { color: #e74c3c; }
+
+.wp-syncline {
+  padding: 0 14px 8px;
+  font-size: 12px;
+  color: var(--wp-muted);
+  border-bottom: 1px solid var(--wp-border);
+}
+.wp-syncline.wp-ok { color: #2ecc71; }
+.wp-syncline.wp-warn { color: #f1c40f; }
+.wp-syncline.wp-bad { color: #e74c3c; }
+
+/* The message box is its own frame so the player can't swallow keystrokes. */
+#wp-compose-frame {
+  flex: 0 0 62px;
+  width: 100%;
+  height: 62px;
+  border: 0;
+  border-top: 1px solid var(--wp-border);
+  background: var(--wp-bg);
+  display: block;
+}
 
 .wp-messages {
   flex: 1;
