@@ -71,6 +71,13 @@ Anyone can play, pause, or seek and everyone follows. The chat slides out from t
 right edge. The starred person is the host and keeps everyone aligned with a
 position heartbeat every 5 seconds.
 
+**When someone messages you:** their note floats up over the video in the bottom
+left, the screen edge gives a soft purple pulse, and a quiet two-note chime plays.
+It drifts for about six seconds and fades on its own, so you can keep the chat
+panel closed and still know when someone said something. Your own messages don't
+float back at you, a burst of messages only chimes once, and the bubbles ride
+along into fullscreen.
+
 **Seeing the sync:** each name in the sidebar carries that person's live position
 in the episode, and the line under them reads "In sync" while everyone is within
 a couple of seconds. If someone drifts it says how far behind or ahead they are,

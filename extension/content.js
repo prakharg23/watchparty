@@ -16,6 +16,9 @@
   const FOLLOW_QUIET_MS = 15000; // after following someone, don't rebroadcast our URL for a while
   const POSITION_MS = 2000; // how often we tell the party where we are
   const SYNC_TOLERANCE = 2.5; // seconds apart before we call someone out of sync
+  const FLOAT_LIFE_MS = 6500; // how long a floating message drifts before it is gone
+  const FLOAT_MAX = 4; // most bubbles on screen at once
+  const PING_GAP_MS = 400; // don't stack pings when messages arrive together
 
   const site = /hulu\.com$/.test(location.hostname) ? "hulu" : "plex";
   const isTop = window.top === window;
@@ -462,6 +465,7 @@
     party = null;
     unread = 0;
     typingUsers.clear();
+    if (floatLayer) floatLayer.textContent = "";
     forgetParty();
     renderRoot();
   }
@@ -537,9 +541,12 @@
         break;
       case "chat":
         chatMessage(msg);
-        if (msg.id !== party?.id && collapsed) {
-          unread++;
-          renderBadge();
+        if (msg.id !== party?.id) {
+          notifyChat(msg.name, msg.text);
+          if (collapsed) {
+            unread++;
+            renderBadge();
+          }
         }
         break;
       case "typing":
@@ -979,6 +986,102 @@
 
   function sendTyping(typing) {
     wsSend({ type: "typing", typing });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Floating messages: a bubble drifts up over the video, the screen edge gives
+  // a soft pulse, and a quiet two-note ping plays. Enough to notice without
+  // pulling you out of the show.
+  // ---------------------------------------------------------------------------
+  let floatLayer = null;
+  let flashEl = null;
+  let audioCtx = null;
+  let lastPing = 0;
+
+  // In fullscreen only children of the fullscreen element are painted, so the
+  // overlay moves in with it. A bare <video> can't hold children, so skip that.
+  function overlayHost() {
+    const fs = document.fullscreenElement;
+    if (fs && fs.tagName !== "VIDEO") return fs;
+    return document.documentElement;
+  }
+
+  function ensureOverlay() {
+    if (!floatLayer) {
+      floatLayer = el("div");
+      floatLayer.id = "wp-floats";
+      flashEl = el("div");
+      flashEl.id = "wp-flash";
+    }
+    const host = overlayHost();
+    if (floatLayer.parentNode !== host) host.appendChild(floatLayer);
+    if (flashEl.parentNode !== host) host.appendChild(flashEl);
+  }
+
+  document.addEventListener("fullscreenchange", () => {
+    if (floatLayer) ensureOverlay();
+  });
+
+  function floatMessage(name, text) {
+    ensureOverlay();
+    const bubble = el("div", "wp-float");
+    bubble.appendChild(el("span", "wp-float-name", name || "Someone"));
+    const body = String(text || "");
+    bubble.appendChild(el("span", "wp-float-text", body.length > 160 ? body.slice(0, 159) + "\u2026" : body));
+    floatLayer.appendChild(bubble);
+    while (floatLayer.children.length > FLOAT_MAX) floatLayer.firstChild.remove();
+    setTimeout(() => bubble.remove(), FLOAT_LIFE_MS + 400);
+  }
+
+  function flash() {
+    ensureOverlay();
+    flashEl.classList.remove("wp-on");
+    void flashEl.offsetWidth; // restart the animation
+    flashEl.classList.add("wp-on");
+  }
+
+  // A short, soft two-note chime, built in the browser so there is no asset to
+  // load and nothing for a page's security policy to block.
+  function ping() {
+    const now = Date.now();
+    if (now - lastPing < PING_GAP_MS) return;
+    lastPing = now;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      if (!audioCtx) audioCtx = new Ctx();
+      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+      const t0 = audioCtx.currentTime;
+      for (const [freq, delay] of [
+        [880, 0],
+        [1318.5, 0.085],
+      ]) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        const start = t0 + delay;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.07, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.38);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(start);
+        osc.stop(start + 0.42);
+      }
+    } catch {
+      /* no audio available; the bubble and flash still land */
+    }
+  }
+
+  function notifyChat(name, text) {
+    try {
+      floatMessage(name, text);
+      flash();
+      ping();
+    } catch {
+      /* a notification must never break the party */
+    }
   }
 
   let toastEl = null;
